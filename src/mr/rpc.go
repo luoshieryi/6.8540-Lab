@@ -6,7 +6,12 @@ package mr
 // remember to capitalize all names.
 //
 
-import "os"
+import (
+	"fmt"
+	"log"
+	"net/rpc"
+	"os"
+)
 import "strconv"
 
 //
@@ -22,8 +27,86 @@ type ExampleReply struct {
 	Y int
 }
 
+//
 // Add your RPC definitions here.
+//
 
+type NewMapArgs struct {
+}
+
+type NewMapReply struct {
+	Filename   string
+	NReduce    int
+	AllMapping bool
+}
+
+func CallNewMap(args *NewMapArgs) (NewMapReply, bool) {
+	reply := NewMapReply{}
+	ok := call("Coordinator.NewMap", args, &reply)
+	return reply, ok && !reply.AllMapping
+}
+
+type DoneMapArgs struct {
+	Intermediates [][]KeyValue
+}
+
+type DoneMapReply struct {
+}
+
+func CallDoneMap(args *DoneMapArgs) (DoneMapReply, bool) {
+	reply := DoneMapReply{}
+	ok := call("Coordinator.DoneMap", args, &reply)
+	return reply, ok
+}
+
+type NewReduceArgs struct {
+}
+
+type NewReduceReply struct {
+	Filename     string
+	Intermediate []KeyValue
+	AllReducing  bool
+	MapDone      bool
+}
+
+func CallNewReduce(args *NewReduceArgs) (NewReduceReply, bool) {
+	reply := NewReduceReply{}
+	ok := call("Coordinator.NewReduce", args, &reply)
+	return reply, ok && !reply.AllReducing
+}
+
+type DoneReduceArgs struct {
+}
+
+type DoneReduceReply struct {
+}
+
+func CallDoneReduce(args *DoneReduceArgs) (DoneReduceReply, bool) {
+	reply := DoneReduceReply{}
+	ok := call("Coordinator.DoneReduce", args, &reply)
+	return reply, ok
+}
+
+// send an RPC request to the coordinator, wait for the response.
+// usually returns true.
+// returns false if something goes wrong.
+func call(rpcname string, args interface{}, reply interface{}) bool {
+	//c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
+	sockname := coordinatorSock()
+	c, err := rpc.DialHTTP("unix", sockname)
+	if err != nil {
+		log.Fatal("dialing:", err)
+	}
+	defer c.Close()
+
+	err = c.Call(rpcname, args, reply)
+	if err == nil {
+		return true
+	}
+
+	fmt.Println(err)
+	return false
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
