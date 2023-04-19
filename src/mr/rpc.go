@@ -35,19 +35,20 @@ type NewMapArgs struct {
 }
 
 type NewMapReply struct {
-	Filename   string
-	NReduce    int
-	AllMapping bool
+	Filename          string
+	TmpFilenamePrefix string
+	NReduce           int
+	IMap              int
+	AllMapping        bool
 }
 
 func CallNewMap(args *NewMapArgs) (NewMapReply, bool) {
 	reply := NewMapReply{}
 	ok := call("Coordinator.NewMap", args, &reply)
-	return reply, ok && !reply.AllMapping
+	return reply, ok
 }
 
 type DoneMapArgs struct {
-	Intermediates [][]KeyValue
 }
 
 type DoneMapReply struct {
@@ -64,7 +65,7 @@ type NewReduceArgs struct {
 
 type NewReduceReply struct {
 	Filename     string
-	Intermediate []KeyValue
+	TmpFilenames []string
 	AllReducing  bool
 	MapDone      bool
 }
@@ -72,7 +73,7 @@ type NewReduceReply struct {
 func CallNewReduce(args *NewReduceArgs) (NewReduceReply, bool) {
 	reply := NewReduceReply{}
 	ok := call("Coordinator.NewReduce", args, &reply)
-	return reply, ok && !reply.AllReducing
+	return reply, ok
 }
 
 type DoneReduceArgs struct {

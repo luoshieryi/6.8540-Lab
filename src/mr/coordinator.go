@@ -4,12 +4,16 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"sync"
 	"sync/atomic"
 )
 import "net"
 import "net/rpc"
 import "net/http"
+
+var (
+	OutFilePrefix = "mr-out-"
+	TmpFilePrefix = "mr-tmp-"
+)
 
 type Coordinator struct {
 	// Your definitions here.
@@ -18,21 +22,17 @@ type Coordinator struct {
 	dMap, dReduce       int32
 	mapDone, reduceDone bool
 	files               []string
-	intermediates       [][]KeyValue
-	interLocks          []sync.Mutex
 }
 
 func DefaultCoordinator() *Coordinator {
 	return &Coordinator{
-		nMap:          10,
-		nReduce:       10,
-		iMap:          0,
-		iReduce:       0,
-		mapDone:       false,
-		reduceDone:    false,
-		files:         []string{},
-		intermediates: [][]KeyValue{},
-		interLocks:    []sync.Mutex{},
+		nMap:       10,
+		nReduce:    10,
+		iMap:       0,
+		iReduce:    0,
+		mapDone:    false,
+		reduceDone: false,
+		files:      []string{},
 	}
 }
 
@@ -51,11 +51,13 @@ func (c *Coordinator) NewMap(args *NewMapArgs, reply *NewMapReply) error {
 	//log.Println("NewMap c", c)
 	for atomic.LoadInt32(&c.iMap) < c.nMap {
 		n := atomic.AddInt32(&c.iMap, 1)
-		//log.Println("NewMap n", n)
+		log.Println("NewMap n", n)
 		if n <= int32(len(c.files)) {
 			n = n - 1
 			reply.Filename = c.files[n]
+			reply.TmpFilenamePrefix = TmpFilePrefix
 			reply.NReduce = int(c.nReduce)
+			reply.IMap = int(n)
 			return nil
 		}
 	}
@@ -64,18 +66,10 @@ func (c *Coordinator) NewMap(args *NewMapArgs, reply *NewMapReply) error {
 }
 
 func (c *Coordinator) DoneMap(args *DoneMapArgs, reply *DoneMapReply) error {
-	go func() {
-		//log.Println("DoneMap len", len(args.Intermediates))
-		for i, kv := range args.Intermediates {
-			c.interLocks[i].Lock()
-			c.intermediates[i] = append(c.intermediates[i], kv...)
-			c.interLocks[i].Unlock()
-		}
-		atomic.AddInt32(&c.dMap, 1)
-		if atomic.LoadInt32(&c.dMap) == c.nMap {
-			c.mapDone = true
-		}
-	}()
+	atomic.AddInt32(&c.dMap, 1)
+	if atomic.LoadInt32(&c.dMap) == c.nMap {
+		c.mapDone = true
+	}
 	return nil
 }
 
@@ -88,8 +82,10 @@ func (c *Coordinator) NewReduce(args *NewReduceArgs, reply *NewReduceReply) erro
 		n := atomic.AddInt32(&c.iReduce, 1)
 		if n <= c.nReduce {
 			n = n - 1
-			reply.Filename = "mr-out-" + strconv.Itoa(int(n))
-			reply.Intermediate = c.intermediates[n]
+			reply.Filename = OutFilePrefix + strconv.Itoa(int(n))
+			for i := int32(0); i < c.nMap; i++ {
+				reply.TmpFilenames = append(reply.TmpFilenames, TmpFilePrefix+strconv.Itoa(int(i))+"-"+strconv.Itoa(int(n)))
+			}
 			return nil
 		}
 	}
@@ -136,8 +132,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.nMap = int32(len(files))
 	c.nReduce = int32(nReduce)
 	c.files = files
-	c.intermediates = make([][]KeyValue, nReduce)
-	c.interLocks = make([]sync.Mutex, nReduce)
 
 	c.server()
 	return c
