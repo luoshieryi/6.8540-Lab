@@ -14,14 +14,16 @@ import "net/rpc"
 import "net/http"
 
 var (
-	OutFilePrefix         = "mr-out-"
-	TmpFilePrefix         = "mr-tmp-"
-	WorkTypeMap           = "map"
-	WorkTypeReduce        = "reduce"
-	workStatusNone  int32 = 0
-	workStatusDoing int32 = 1
-	workStatusDone  int32 = 2
-	workStatusFail  int32 = 3
+	OutFilePrefix   = "mr-out-"
+	TmpFilePrefix   = "mr-tmp-"
+	WorkTypeNone    = 0
+	WorkTypeMap     = 1
+	WorkTypeReduce  = 2
+	WorkTypeDone    = 3
+	workStatusNone  = 0
+	workStatusDoing = 1
+	workStatusDone  = 2
+	workStatusFail  = 3
 )
 
 func GenerateTmpFileNames(iMap, nReduce int32) (tmpFiles []string) {
@@ -42,135 +44,103 @@ func GenerateOutFileName(iReduce int32) string {
 	return OutFilePrefix + strconv.Itoa(int(iReduce))
 }
 
-func initWork(c *Coordinator, workType string, n int32) {
-	for i := int32(0); i < n; i++ {
+func initWork(c *Coordinator, workType int, nWork int32) {
+	c.workType = workType
+	c.dWorkCount = 0
+	for i := int32(0); i < nWork; i++ {
 		c.workQueue <- i
-		switch workType {
-		case WorkTypeMap:
-			c.mapStatus[i] = workStatusNone
-		case WorkTypeReduce:
-			c.reduceStatus[i] = workStatusNone
-		}
+		c.workStatus[i] = workStatusNone
 	}
 }
 
 type Coordinator struct {
 	// Your definitions here.
-	nMap, nReduce           int32
-	mapStatus, reduceStatus []int32
-	dMapLock, dReduceLock   sync.Mutex
-	dMapCount, dReduceCount int32
-	mapDone, reduceDone     bool
-	filenames               []string
-	workQueue               chan int32
+	nMap, nReduce int32
+	filenames     []string
+	workType      int
+	workStatus    []int
+	dWorkLock     sync.Mutex
+	dWorkCount    int32
+	workQueue     chan int32
 }
 
 func DefaultCoordinator() *Coordinator {
 	return &Coordinator{
-		nMap:         0,
-		nReduce:      10,
-		mapStatus:    []int32{}, // mapStatus[iMap], map任务状态
-		reduceStatus: []int32{}, // reduceStatus[iReduce], reduce任务状态
-		mapDone:      false,
-		reduceDone:   false,
-		filenames:    []string{},           // filenames[iMap], 输入文件
-		workQueue:    make(chan int32, 10), // 正在工作的任务队列
+		nMap:       0,
+		nReduce:    10,
+		filenames:  []string{}, // filenames[iWork], 输入文件
+		workType:   WorkTypeNone,
+		workStatus: []int{}, // workStatus[iWork], 任务状态
+		dWorkLock:  sync.Mutex{},
+		dWorkCount: 0,
+		workQueue:  make(chan int32, 10), // 正在工作的任务队列
 	}
 }
 
-func (c *Coordinator) NewMap(args *NewMapArgs, reply *NewMapReply) error {
+func (c *Coordinator) NewWork(args *NewWorkArgs, reply *NewWorkReply) error {
 
-	//log.Println("NewMapRequest", c)
+	//log.Println("new work", c)
 
-	if c.mapDone {
-		reply.MapDone = true
+	if c.workType == WorkTypeDone {
+		reply.WorkType = WorkTypeDone
 		return nil
 	}
+
 	select {
-	case iMap := <-c.workQueue:
-		if c.mapStatus[iMap] == workStatusDoing || c.mapStatus[iMap] == workStatusDone {
+	case iWork := <-c.workQueue:
+		if c.workStatus[iWork] == workStatusDoing || c.workStatus[iWork] == workStatusDone {
+			reply.WorkType = WorkTypeNone
 			return nil
 		}
-		c.mapStatus[iMap] = workStatusDoing
-		reply.Filename = c.filenames[iMap]
-		reply.NReduce = int(c.nReduce)
-		reply.IMap = int(iMap)
-		time.AfterFunc(time.Second*10, func() {
-			c.dMapLock.Lock()
-			if c.mapStatus[iMap] == workStatusDoing {
-				c.mapStatus[iMap] = workStatusFail
-				c.workQueue <- iMap
-			}
-			c.dMapLock.Unlock()
-		})
-	default:
-		reply.AllMapping = true
-	}
-	return nil
-}
 
-func (c *Coordinator) DoneMap(args *DoneMapArgs, reply *DoneMapReply) error {
-
-	//log.Println("DoneMapRequest", c)
-
-	c.dMapLock.Lock()
-	if c.mapStatus[args.IMap] == workStatusDone {
-		c.dMapLock.Unlock()
-		return nil
-	}
-	c.mapStatus[args.IMap] = workStatusDone
-	c.dMapLock.Unlock()
-
-	if count := atomic.AddInt32(&c.dMapCount, 1); count == c.nMap {
-		c.mapDone = true
-		initWork(c, WorkTypeReduce, c.nReduce)
-	}
-
-	//log.Println("DoneMapRequestEnd", c)
-
-	return nil
-}
-
-func (c *Coordinator) NewReduce(args *NewReduceArgs, reply *NewReduceReply) error {
-	if c.reduceDone {
-		reply.ReduceDone = true
-		return nil
-	}
-	select {
-	case iReduce := <-c.workQueue:
-		if c.reduceStatus[iReduce] == workStatusDoing || c.reduceStatus[iReduce] == workStatusDone {
-			return nil
-		}
-		c.reduceStatus[iReduce] = workStatusDoing
-		reply.IReduce = int(iReduce)
+		c.workStatus[iWork] = workStatusDoing
+		reply.WorkType = c.workType
+		reply.IWork = int(iWork)
 		reply.NMap = int(c.nMap)
-		reply.Filename = GenerateOutFileName(iReduce)
+		reply.NReduce = int(c.nReduce)
+		switch c.workType {
+		case WorkTypeMap:
+			reply.Filename = c.filenames[iWork]
+		case WorkTypeReduce:
+			reply.Filename = GenerateOutFileName(iWork)
+		}
+
 		time.AfterFunc(time.Second*10, func() {
-			c.dReduceLock.Lock()
-			if c.reduceStatus[iReduce] == workStatusDoing {
-				c.reduceStatus[iReduce] = workStatusFail
-				c.workQueue <- iReduce
+			c.dWorkLock.Lock()
+			if reply.WorkType == c.workType && c.workStatus[iWork] == workStatusDoing {
+				c.workStatus[iWork] = workStatusFail
+				c.workQueue <- iWork
 			}
-			c.dReduceLock.Unlock()
+			c.dWorkLock.Unlock()
 		})
 	default:
-		reply.AllReducing = true
+		reply.WorkType = WorkTypeNone
 	}
+
 	return nil
 }
 
-func (c *Coordinator) DoneReduce(args *DoneReduceArgs, reply *DoneReduceReply) error {
-	c.dReduceLock.Lock()
-	if c.reduceStatus[args.IReduce] == workStatusDone {
-		c.dReduceLock.Unlock()
+func (c *Coordinator) DoneWork(args *DoneWorkArgs, reply *DoneWorkReply) error {
+	c.dWorkLock.Lock()
+	// WorkType避免过期的任务提交
+	if c.workStatus[args.IWork] == workStatusDone || c.workType != args.WorkType {
+		c.dWorkLock.Unlock()
 		return nil
 	}
-	c.reduceStatus[args.IReduce] = workStatusDone
-	c.dReduceLock.Unlock()
+	c.workStatus[args.IWork] = workStatusDone
+	c.dWorkLock.Unlock()
 
-	if count := atomic.AddInt32(&c.dReduceCount, 1); count == c.nReduce {
-		c.reduceDone = true
+	switch c.workType {
+	case WorkTypeMap:
+		if count := atomic.AddInt32(&c.dWorkCount, 1); count == c.nMap {
+			initWork(c, WorkTypeReduce, c.nReduce)
+		}
+	case WorkTypeReduce:
+		if count := atomic.AddInt32(&c.dWorkCount, 1); count == c.nReduce {
+			c.workType = WorkTypeDone
+		}
 	}
+
 	return nil
 }
 
@@ -192,7 +162,7 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	return c.reduceDone
+	return c.workType == WorkTypeDone
 }
 
 // MakeCoordinator
@@ -205,9 +175,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.nMap = int32(len(files))
 	c.nReduce = int32(nReduce)
 	c.filenames = files
-	c.mapStatus = make([]int32, c.nMap)
-	c.reduceStatus = make([]int32, c.nReduce)
-	c.workQueue = make(chan int32, int(math.Max(float64(c.nMap), float64(c.nReduce))))
+	mxN := int(math.Max(float64(c.nMap), float64(c.nReduce)))
+	c.workStatus = make([]int, mxN)
+	c.workQueue = make(chan int32, mxN)
 
 	initWork(c, WorkTypeMap, c.nMap)
 

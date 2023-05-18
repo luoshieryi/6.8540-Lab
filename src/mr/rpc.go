@@ -18,63 +18,35 @@ import "strconv"
 // Add your RPC definitions here.
 //
 
-type NewMapArgs struct {
+type NewWorkArgs struct {
 }
 
-type NewMapReply struct {
-	IMap       int
-	NReduce    int
-	Filename   string
-	AllMapping bool
-	MapDone    bool
+type NewWorkReply struct {
+	WorkType int
+	WorkDone bool
+	IWork    int
+	NMap     int
+	NReduce  int
+	Filename string
 }
 
-func CallNewMap(args *NewMapArgs) (NewMapReply, bool) {
-	reply := NewMapReply{}
-	ok := call("Coordinator.NewMap", args, &reply)
+func CallNewWork(args *NewWorkArgs) (NewWorkReply, bool) {
+	reply := NewWorkReply{}
+	ok := call("Coordinator.NewWork", args, &reply)
 	return reply, ok
 }
 
-type DoneMapArgs struct {
-	IMap int32
+type DoneWorkArgs struct {
+	IWork    int
+	WorkType int
 }
 
-type DoneMapReply struct {
+type DoneWorkReply struct {
 }
 
-func CallDoneMap(args *DoneMapArgs) (DoneMapReply, bool) {
-	reply := DoneMapReply{}
-	ok := call("Coordinator.DoneMap", args, &reply)
-	return reply, ok
-}
-
-type NewReduceArgs struct {
-}
-
-type NewReduceReply struct {
-	IReduce     int
-	NMap        int
-	Filename    string
-	AllReducing bool
-	ReduceDone  bool
-}
-
-func CallNewReduce(args *NewReduceArgs) (NewReduceReply, bool) {
-	reply := NewReduceReply{}
-	ok := call("Coordinator.NewReduce", args, &reply)
-	return reply, ok
-}
-
-type DoneReduceArgs struct {
-	IReduce int32
-}
-
-type DoneReduceReply struct {
-}
-
-func CallDoneReduce(args *DoneReduceArgs) (DoneReduceReply, bool) {
-	reply := DoneReduceReply{}
-	ok := call("Coordinator.DoneReduce", args, &reply)
+func CallDoneWork(args *DoneWorkArgs) (DoneWorkReply, bool) {
+	reply := DoneWorkReply{}
+	ok := call("Coordinator.DoneWork", args, &reply)
 	return reply, ok
 }
 
