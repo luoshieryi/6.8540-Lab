@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"sort"
-	"strconv"
 	"time"
 )
 
@@ -36,11 +35,13 @@ func ihash(key string) int {
 
 // DoneMap
 // map后产生的中间文件
-func DoneMap(intermediates [][]KeyValue, tmpFilenamePrefix string, iMap int) {
+func DoneMap(intermediates [][]KeyValue, iMap int) {
+	tmpFiles := GenerateTmpFileNames(int32(iMap), int32(len(intermediates)))
 	for iReduce, intermediate := range intermediates {
-		filename := tmpFilenamePrefix + strconv.Itoa(iMap) + "-" + strconv.Itoa(iReduce)
-		log.Println("TmpMap: ", filename)
-		file, _ := os.Create(filename)
+
+		//log.Println("TmpMap: ", tmpFiles[iReduce])	// Log
+
+		file, _ := os.Create(tmpFiles[iReduce])
 		enc := json.NewEncoder(file)
 		for _, kv := range intermediate {
 			enc.Encode(&kv)
@@ -51,8 +52,7 @@ func DoneMap(intermediates [][]KeyValue, tmpFilenamePrefix string, iMap int) {
 
 // Worker
 // main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
 	// log.Println("Worker started")
@@ -60,10 +60,18 @@ func Worker(mapf func(string, string) []KeyValue,
 	// CallExample()
 	for {
 		reply, _ := CallNewMap(&NewMapArgs{})
-		//log.Println("NewMapReply: ", reply)
+
+		//log.Println("NewMapRequest: ", reply) // Log
+
 		if reply.AllMapping {
+			time.Sleep(time.Second)
+			continue
+		}
+		if reply.MapDone {
 			break
 		}
+
+		//log.Println("NewMapWork: ", reply) // Log
 
 		file, err := os.Open(reply.Filename)
 		if err != nil {
@@ -80,25 +88,33 @@ func Worker(mapf func(string, string) []KeyValue,
 			iReduce := ihash(kv.Key) % reply.NReduce
 			intermediates[iReduce] = append(intermediates[iReduce], kv)
 		}
-		DoneMap(intermediates, reply.TmpFilenamePrefix, reply.IMap)
-		CallDoneMap(&DoneMapArgs{})
+
+		//log.Println("DoneMap: ", reply.IMap) // Log
+
+		DoneMap(intermediates, reply.IMap)
+
+		//log.Println("CallDoneMap: ", reply.IMap) // Log
+
+		CallDoneMap(&DoneMapArgs{IMap: int32(reply.IMap)})
 	}
 
 	for {
 		reply, _ := CallNewReduce(&NewReduceArgs{})
 
-		// log.Println("NewReduceFile: ", reply.Filename)
-
-		if reply.MapDone {
-			time.Sleep(time.Second)
-		}
+		//log.Println("NewReduceWork: ", reply)
 
 		if reply.AllReducing {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		if reply.ReduceDone {
 			break
 		}
 
 		intermediate := make([]KeyValue, 0)
-		for _, filename := range reply.TmpFilenames {
+		//log.Println("ReduceFileNames: ", GenerateReduceFileNames(int32(reply.IReduce), int32(reply.NMap)))
+		for _, filename := range GenerateReduceFileNames(int32(reply.IReduce), int32(reply.NMap)) {
 			file, _ := os.Open(filename)
 			dec := json.NewDecoder(file)
 			for {
@@ -130,7 +146,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 
 		ofile.Close()
-		CallDoneReduce(&DoneReduceArgs{})
+		CallDoneReduce(&DoneReduceArgs{IReduce: int32(reply.IReduce)})
 	}
 
 }

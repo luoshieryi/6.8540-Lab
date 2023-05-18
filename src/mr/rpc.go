@@ -15,19 +15,6 @@ import (
 import "strconv"
 
 //
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
-}
-
-type ExampleReply struct {
-	Y int
-}
-
-//
 // Add your RPC definitions here.
 //
 
@@ -35,11 +22,11 @@ type NewMapArgs struct {
 }
 
 type NewMapReply struct {
-	Filename          string
-	TmpFilenamePrefix string
-	NReduce           int
-	IMap              int
-	AllMapping        bool
+	IMap       int
+	NReduce    int
+	Filename   string
+	AllMapping bool
+	MapDone    bool
 }
 
 func CallNewMap(args *NewMapArgs) (NewMapReply, bool) {
@@ -49,6 +36,7 @@ func CallNewMap(args *NewMapArgs) (NewMapReply, bool) {
 }
 
 type DoneMapArgs struct {
+	IMap int32
 }
 
 type DoneMapReply struct {
@@ -64,10 +52,11 @@ type NewReduceArgs struct {
 }
 
 type NewReduceReply struct {
-	Filename     string
-	TmpFilenames []string
-	AllReducing  bool
-	MapDone      bool
+	IReduce     int
+	NMap        int
+	Filename    string
+	AllReducing bool
+	ReduceDone  bool
 }
 
 func CallNewReduce(args *NewReduceArgs) (NewReduceReply, bool) {
@@ -77,6 +66,7 @@ func CallNewReduce(args *NewReduceArgs) (NewReduceReply, bool) {
 }
 
 type DoneReduceArgs struct {
+	IReduce int32
 }
 
 type DoneReduceReply struct {
